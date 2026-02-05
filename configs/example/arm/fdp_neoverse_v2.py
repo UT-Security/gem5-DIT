@@ -36,28 +36,48 @@
 #
 
 """
-Fetch directed instruction prefetch (FDP) example
+Fetch directed instruction prefetch (FDP) example with SimPoint support
 
-This gem5 configuation script creates a simple simulation setup with a single
-O3 CPU model and decoupled front-end. Is serves as a starting point for the
-FDP implementation. As workload a simple "Hello World!" program is used.
-
-FDP is tested with the X86, Arm, RISC-V isa which can be specified
-using the --isa flag.
+This gem5 configuration script creates a simulation setup with a single
+O3 CPU model (NeoverseV2) and decoupled front-end. It supports:
+1. Simple workload execution with FDP
+2. SimPoint checkpoint creation (fast-forward with AtomicSimpleCPU)
+3. SimPoint checkpoint restoration and detailed simulation with NeoverseV2
 
 Usage
 -----
 
+Basic usage (original behavior):
 ```
-scons build/ALL/gem5.opt
-./build/ALL/gem5.opt \
-    configs/example/arm/fdp_neoverse_v2.py \
-    --isa <isa> \
-    [--disable-fdp]
+scons build/ARM/gem5.opt
+./build/ARM/gem5.opt configs/example/arm/fdp_neoverse_v2.py
+```
+
+Taking SimPoint checkpoints:
+```
+./build/ARM/gem5.opt configs/example/arm/fdp_neoverse_v2.py \
+    --binary /path/to/benchmark \
+    --simpoint-file /path/to/simpoint.txt \
+    --weight-file /path/to/weight.txt \
+    --simpoint-interval 1000000 \
+    --take-checkpoint ./m5out/checkpoints
+```
+
+Restoring from SimPoint checkpoint:
+```
+./build/ARM/gem5.opt configs/example/arm/fdp_neoverse_v2.py \
+    --binary /path/to/benchmark \
+    --simpoint-file /path/to/simpoint.txt \
+    --weight-file /path/to/weight.txt \
+    --simpoint-interval 1000000 \
+    --warmup-interval 100000 \
+    --checkpoint-dir ./m5out/checkpoints \
+    --restore-simpoint 0
 ```
 """
 
 import argparse
+from pathlib import Path
 
 import m5
 from m5.util import addToPath
@@ -78,6 +98,7 @@ from m5.objects import (
 
 from gem5.components.boards.abstract_board import AbstractBoard
 from gem5.components.boards.simple_board import SimpleBoard
+from gem5.components.boards.mem_mode import MemMode
 from gem5.components.cachehierarchies.classic.caches.mmu_cache import MMUCache
 from gem5.components.cachehierarchies.classic.private_l1_private_l2_cache_hierarchy import (
     PrivateL1PrivateL2CacheHierarchy,
@@ -85,12 +106,18 @@ from gem5.components.cachehierarchies.classic.private_l1_private_l2_cache_hierar
 from gem5.components.memory import SingleChannelDDR3_1600
 from gem5.components.processors.base_cpu_core import BaseCPUCore
 from gem5.components.processors.base_cpu_processor import BaseCPUProcessor
+from gem5.components.processors.cpu_types import CPUTypes
+from gem5.components.processors.simple_core import SimpleCore
+from gem5.components.processors.switchable_processor import SwitchableProcessor
 from gem5.isas import ISA
 from gem5.resources.resource import (
     BinaryResource,
+    SimpointDirectoryResource,
     obtain_resource,
 )
+from gem5.simulate.exit_event import ExitEvent
 from gem5.simulate.simulator import Simulator
+from gem5.utils.override import overrides
 from gem5.utils.requires import requires
 
 workloads = {
@@ -117,24 +144,156 @@ parser.add_argument(
     help="Disable FDP to evaluate baseline performance.",
 )
 
+parser.add_argument(
+    "--binary",
+    type=str,
+    default=None,
+    help="Path to custom binary (overrides --workload).",
+)
+
+parser.add_argument(
+    "--arguments",
+    type=str,
+    default="",
+    help='Arguments to pass to the binary (e.g., --arguments "-I./lib input.txt 100").',
+)
+
+parser.add_argument(
+    "--simpoint-file",
+    type=str,
+    default=None,
+    help="Path to simpoint.txt file with SimPoint indices.",
+)
+
+parser.add_argument(
+    "--weight-file",
+    type=str,
+    default=None,
+    help="Path to weight.txt file with SimPoint weights.",
+)
+
+parser.add_argument(
+    "--simpoint-interval",
+    type=int,
+    default=None,
+    help="SimPoint interval in instructions.",
+)
+
+parser.add_argument(
+    "--warmup-interval",
+    type=int,
+    default=0,
+    help="Warmup instructions before each SimPoint.",
+)
+
+parser.add_argument(
+    "--checkpoint-dir",
+    type=str,
+    default=None,
+    help="Directory containing SimPoint checkpoints to restore from.",
+)
+
+parser.add_argument(
+    "--take-checkpoint",
+    type=str,
+    default=None,
+    help="Directory to save SimPoint checkpoints to.",
+)
+
+parser.add_argument(
+    "--restore-simpoint",
+    type=int,
+    default=0,
+    help="Which SimPoint index to restore (0, 1, 2, etc.).",
+)
+
 args = parser.parse_args()
 
 
 requires(isa_required=ISA.ARM)
 
 # We use a single channel DDR3_1600 memory system
-memory = SingleChannelDDR3_1600(size="32MiB")
+memory = SingleChannelDDR3_1600(size="3GiB")
 
 
-# 1. Instruction prefetcher ---------------------------------------------
+# 1. SimPoint-aware Switchable Processor --------------------------------
+# A custom processor that switches between AtomicSimpleCPU (for fast-forward)
+# and NeoverseV2 O3 CPU (for detailed simulation).
+
+
+class FDPSwitchableProcessor(SwitchableProcessor):
+    """
+    A switchable processor that uses AtomicSimpleCPU for fast-forwarding
+    and NeoverseV2 O3 CPU for detailed simulation with FDP support.
+    """
+
+    def __init__(self, num_cores: int = 1, disable_fdp: bool = False):
+        self._start_key = "start"
+        self._switch_key = "switch"
+        self._current_is_start = True
+        self._disable_fdp = disable_fdp
+
+        # Atomic cores for fast-forward
+        start_cores = [
+            SimpleCore(cpu_type=CPUTypes.ATOMIC, core_id=i, isa=ISA.ARM)
+            for i in range(num_cores)
+        ]
+
+        # NeoverseV2 cores for detailed simulation
+        switch_cores = []
+        for i in range(num_cores):
+            neoverse_cpu = neoverse_v2.NeoverseV2()
+            neoverse_cpu.cpu_id = i
+            neoverse_cpu.decoupledFrontEnd = not disable_fdp
+            switch_cores.append(BaseCPUCore(neoverse_cpu, isa=ISA.ARM))
+
+        self._detailed_cores = switch_cores
+
+        super().__init__(
+            switchable_cores={
+                self._start_key: start_cores,
+                self._switch_key: switch_cores,
+            },
+            starting_cores=self._start_key,
+        )
+
+    def get_detailed_cores(self):
+        """Returns the NeoverseV2 cores for FDP registration."""
+        return self._detailed_cores
+
+    @overrides(SwitchableProcessor)
+    def incorporate_processor(self, board: AbstractBoard) -> None:
+        super().incorporate_processor(board=board)
+        # Start with atomic memory mode for fast-forward
+        board.set_mem_mode(MemMode.ATOMIC)
+
+    def switch(self):
+        """Switches between start (atomic) and switch (detailed) cores."""
+        if self._current_is_start:
+            self.switch_to_processor(self._switch_key)
+            # After switching to detailed CPU, update memory mode to timing
+            self._board.set_mem_mode(MemMode.TIMING)
+        else:
+            self.switch_to_processor(self._start_key)
+            self._board.set_mem_mode(MemMode.ATOMIC)
+        self._current_is_start = not self._current_is_start
+
+
+# 2. Instruction prefetcher ---------------------------------------------
 # The decoupled front-end is only the first part.
 # Now we also need the instruction prefetcher which listens to the
 # insertions into the fetch target queue (FTQ) to issue prefetches.
 
 
 class CacheHierarchy(PrivateL1PrivateL2CacheHierarchy):
-    def __init__(self):
+    def __init__(self, disable_fdp: bool = False):
         super().__init__("", "", "")
+        self._disable_fdp = disable_fdp
+        self._detailed_cores = None
+
+    def set_detailed_cores(self, cores):
+        """Set the cores to register FDP prefetcher with (for switchable processor)."""
+        self._detailed_cores = cores
 
     def incorporate_cache(self, board: AbstractBoard) -> None:
         board.connect_system_port(self.membus.cpu_side_ports)
@@ -149,10 +308,14 @@ class CacheHierarchy(PrivateL1PrivateL2CacheHierarchy):
 
         # Add the prefetchers to the L1I caches and register the MMU.
         for i in range(board.get_processor().get_num_cores()):
-            cpu = board.get_processor().cores[i].core
+            # Use detailed cores if set (switchable mode), else current cores
+            if self._detailed_cores:
+                cpu = self._detailed_cores[i].core
+            else:
+                cpu = board.get_processor().cores[i].core
 
             self.l1icaches[i].prefetcher = MultiPrefetcher()
-            if not args.disable_fdp:
+            if not self._disable_fdp:
                 pf = FetchDirectedPrefetcher(
                     use_virtual_addresses=True, cpu=cpu
                 )
@@ -215,32 +378,45 @@ class CacheHierarchy(PrivateL1PrivateL2CacheHierarchy):
             cpu.connect_interrupt()
 
 
-cache_hierarchy = CacheHierarchy()
+# Determine if we're using SimPoint mode
+use_simpoint_mode = args.simpoint_file is not None and args.weight_file is not None
+
+# Create cache hierarchy
+cache_hierarchy = CacheHierarchy(disable_fdp=args.disable_fdp)
 
 
-# 2. Decoupled front-end ------------------------------------------------
+# 3. Decoupled front-end ------------------------------------------------
 # Next setup the decoupled front-end. Its implemented in the O3 core.
 # Create the processor with one core
 
-processor = BaseCPUProcessor(
-    cores=[BaseCPUCore(neoverse_v2.NeoverseV2(), isa=ISA.ARM)]
-)
+if use_simpoint_mode:
+    # SimPoint mode: use switchable processor for fast-forward + detailed
+    processor = FDPSwitchableProcessor(num_cores=1, disable_fdp=args.disable_fdp)
+    # Register detailed cores with cache hierarchy for FDP prefetcher
+    cache_hierarchy.set_detailed_cores(processor.get_detailed_cores())
+    print(
+        f"SimPoint mode: AtomicSimpleCPU (fast-forward) -> NeoverseV2 (detailed) "
+        f"FDP {'disabled' if args.disable_fdp else 'enabled'}"
+    )
+else:
+    # Original mode: direct NeoverseV2
+    processor = BaseCPUProcessor(
+        cores=[BaseCPUCore(neoverse_v2.NeoverseV2(), isa=ISA.ARM)]
+    )
 
-for core in processor.cores:
-    cpu = core.core
+    for core in processor.cores:
+        cpu = core.core
+        # The `decoupledFrontEnd` parameter enables the decoupled front-end.
+        # Disable it to get the baseline.
+        if args.disable_fdp:
+            cpu.decoupledFrontEnd = False
+        else:
+            cpu.decoupledFrontEnd = True
 
-    # The `decoupledFrontEnd` parameter enables the decoupled front-end.
-    # Disable it to get the baseline.
-    if args.disable_fdp:
-        cpu.decoupledFrontEnd = False
-    else:
-        cpu.decoupledFrontEnd = True
-
-
-print(
-    f"Running {args.workload} on NeoverseV2 "
-    f"FDP {'disabled' if args.disable_fdp else 'enabled'}"
-)
+    print(
+        f"Running {args.workload} on NeoverseV2 "
+        f"FDP {'disabled' if args.disable_fdp else 'enabled'}"
+    )
 
 
 # The gem5 library simple board which can be used to run simple SE-mode
@@ -252,14 +428,110 @@ board = SimpleBoard(
     cache_hierarchy=cache_hierarchy,
 )
 
-# Here we set the workload. In this case we want to run a simple "Hello World!"
-# program compiled to the specified ISA. The `Resource` class will automatically
-# download the binary from the gem5 Resources cloud bucket if it's not already
-# present.
-board.set_se_binary_workload(obtain_resource(workloads[args.workload]))
+# Determine binary to use
+if args.binary:
+    binary = BinaryResource(local_path=args.binary)
+else:
+    binary = obtain_resource(workloads[args.workload])
 
-# Lastly we run the simulation.
-simulator = Simulator(board=board)
+# Parse arguments string into list
+binary_args = args.arguments.split() if args.arguments else []
+
+# Set workload based on mode
+if use_simpoint_mode:
+    # Create SimPoint resource from files
+    simpoint_dir = Path(args.simpoint_file).parent
+    simpoint = SimpointDirectoryResource(
+        local_path=str(simpoint_dir),
+        simpoint_file=Path(args.simpoint_file).name,
+        weight_file=Path(args.weight_file).name,
+        simpoint_interval=args.simpoint_interval,
+        warmup_interval=args.warmup_interval,
+    )
+
+    if args.checkpoint_dir:
+        # Restore from specific SimPoint checkpoint
+        cpt_path = Path(args.checkpoint_dir) / f"cpt.SimPoint{args.restore_simpoint}"
+        print(f"Restoring from checkpoint: {cpt_path}")
+        board.set_se_simpoint_workload(
+            binary=binary,
+            arguments=binary_args,
+            simpoint=simpoint,
+            checkpoint=cpt_path,
+        )
+    else:
+        board.set_se_simpoint_workload(
+            binary=binary,
+            arguments=binary_args,
+            simpoint=simpoint,
+        )
+else:
+    # Original mode: simple binary workload
+    board.set_se_binary_workload(binary, arguments=binary_args)
+
+
+# Exit event handlers for SimPoint mode
+def simpoint_checkpoint_handler(checkpoint_dir: Path):
+    """Generator to save checkpoints at each SimPoint."""
+    idx = 0
+    while True:
+        cpt_path = checkpoint_dir / f"cpt.SimPoint{idx}"
+        m5.checkpoint(str(cpt_path))
+        print(f"Saved checkpoint to {cpt_path}")
+        idx += 1
+        yield False  # Continue simulation
+
+
+# Create simulator with appropriate exit event handlers
+if use_simpoint_mode:
+    if args.take_checkpoint:
+        # Taking checkpoints: use SIMPOINT_BEGIN handler
+        checkpoint_path = Path(args.take_checkpoint)
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
+        simulator = Simulator(
+            board=board,
+            on_exit_event={
+                ExitEvent.SIMPOINT_BEGIN: simpoint_checkpoint_handler(checkpoint_path)
+            },
+        )
+    elif args.checkpoint_dir:
+        # Restoring from checkpoint: use MAX_INSTS handler for warmup/measurement
+        # Define the generator here so it can reference simulator via closure
+        def simpoint_restore_handler():
+            """Generator to handle warmup -> measurement phases after checkpoint restore."""
+            warmed_up = False
+            while True:
+                if warmed_up:
+                    print("SimPoint interval complete")
+                    m5.stats.dump()
+                    yield True  # Exit after measurement
+                else:
+                    print("Warmup complete, switching to NeoverseV2 for measurement")
+                    warmed_up = True
+                    # Switch to detailed CPU
+                    simulator.switch_processor()
+                    m5.stats.reset()
+                    # Schedule measurement interval
+                    simulator.schedule_max_insts(
+                        board.get_simpoint().get_simpoint_interval()
+                    )
+                    yield False
+
+        simulator = Simulator(
+            board=board,
+            on_exit_event={ExitEvent.MAX_INSTS: simpoint_restore_handler()},
+        )
+        # Schedule warmup exit
+        warmup_insts = board.get_simpoint().get_warmup_list()[args.restore_simpoint]
+        print(f"Scheduling warmup for {warmup_insts} instructions")
+        simulator.schedule_max_insts(warmup_insts)
+    else:
+        # Just running with SimPoints, no checkpointing
+        simulator = Simulator(board=board)
+else:
+    # Original mode
+    simulator = Simulator(board=board)
+
 simulator.run()
 
 print("Simulation done.")
