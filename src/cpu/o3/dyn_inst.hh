@@ -189,6 +189,7 @@ class DynInst : public ExecContext, public RefCounted
         HtmFromTransaction,
         NoCapableFU,           /// Processor does not have capability to
                                /// execute the instruction
+        ValuePredicted,        /// Load has a value prediction
         MaxFlags
     };
 
@@ -357,6 +358,13 @@ class DynInst : public ExecContext, public RefCounted
     typename LSQUnit::SQIterator sqIt;
 
 
+    /////////////////////// Load Value Prediction //////////////////////
+    /** Predicted value from the load value predictor. */
+    RegVal lvpPredictedValue = 0;
+
+    /** Whether a value prediction was made for this load. */
+    bool lvpPredictionMade = false;
+
     /////////////////////// TLB Miss //////////////////////
     /**
      * Saved memory request (needed when the DTB address translation is
@@ -375,6 +383,10 @@ class DynInst : public ExecContext, public RefCounted
     /** Is the effective virtual address valid. */
     bool effAddrValid() const { return instFlags[EffAddrValid]; }
     void effAddrValid(bool b) { instFlags[EffAddrValid] = b; }
+
+    /** Was a value prediction made for this load? */
+    bool isValuePredicted() const { return instFlags[ValuePredicted]; }
+    void setValuePredicted() { instFlags[ValuePredicted] = true; }
 
     /** Whether or not the memory operation is done. */
     bool memOpDone() const { return instFlags[MemOpDone]; }
@@ -1030,6 +1042,9 @@ class DynInst : public ExecContext, public RefCounted
     /* Values used by LoadToUse stat */
     Tick firstIssue = -1;
     Tick lastWakeDependents = -1;
+
+    /** Tick when this instruction was inserted into the IQ. */
+    Tick iqInsertTick = -1;
 
     /** Reads a misc. register, including any side-effects the read
      * might have as defined by the architecture.

@@ -55,6 +55,7 @@
 #include "debug/Activity.hh"
 #include "debug/Drain.hh"
 #include "debug/IEW.hh"
+#include "debug/LVP.hh"
 #include "params/BaseO3CPU.hh"
 
 namespace gem5
@@ -124,6 +125,9 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
     updateLSQNextCycle = false;
 
     skidBufferMax = (renameToIEWDelay + 1) * params.renameWidth;
+
+    // Initialize load value predictor.
+    lvp = params.loadValuePredictor;
 }
 
 std::string
@@ -175,6 +179,8 @@ IEW::IEWStats::IEWStats(CPU *cpu)
                "Number of times the LSQ has become full, causing a stall"),
       ADD_STAT(memOrderViolationEvents, statistics::units::Count::get(),
                "Number of memory order violations"),
+      ADD_STAT(valueMispredicts, statistics::units::Count::get(),
+               "Number of load value mispredictions"),
       ADD_STAT(predictedTakenIncorrect, statistics::units::Count::get(),
                "Number of branches that were predicted taken incorrectly"),
       ADD_STAT(predictedNotTakenIncorrect, statistics::units::Count::get(),
@@ -466,6 +472,11 @@ IEW::squash(ThreadID tid)
         skidBuffer[tid].pop();
     }
 
+    // Clean up LVP history for squashed instructions.
+    if (lvp) {
+        lvp->squash(fromCommit->commitInfo[tid].doneSeqNum, tid);
+    }
+
     emptyRenameInsts(tid);
 }
 
@@ -514,6 +525,28 @@ IEW::squashDueToMemOrder(const DynInstPtr& inst, ThreadID tid)
 
         // Must include the memory violator in the squash.
         toCommit->includeSquashInst[tid] = true;
+
+        wroteToTimeBuffer = true;
+    }
+}
+
+void
+IEW::squashDueToValueMispredict(const DynInstPtr& inst, ThreadID tid)
+{
+    DPRINTF(IEW, "[tid:%i] Value misprediction, squashing younger insts, "
+            "PC: %s [sn:%llu].\n", tid, inst->pcState(), inst->seqNum);
+
+    if (!toCommit->squash[tid] ||
+            inst->seqNum <= toCommit->squashedSeqNum[tid]) {
+        toCommit->squash[tid] = true;
+
+        toCommit->squashedSeqNum[tid] = inst->seqNum;
+        set(toCommit->pc[tid], inst->pcState());
+        toCommit->mispredictInst[tid] = NULL;
+
+        // The load itself already has the correct value from completeAcc,
+        // so do not include it in the squash — only squash younger insts.
+        toCommit->includeSquashInst[tid] = false;
 
         wroteToTimeBuffer = true;
     }
@@ -1086,6 +1119,56 @@ IEW::dispatchInsts(ThreadID tid)
             instQueue.insert(inst);
         }
 
+        // Load Value Prediction: after IQ insertion (so the dependency
+        // graph is set up), attempt to predict the load value and
+        // speculatively wake dependent instructions.
+        if (lvp && lvp->isEnabled() && inst->isLoad() &&
+            !inst->isSquashed() && !inst->strictlyOrdered() &&
+            inst->numDestRegs() > 0) {
+
+            PhysRegIdPtr destReg = inst->renamedDestIdx(0);
+
+            // Only predict for integer register destinations.
+            if (destReg->classValue() == IntRegClass &&
+                !destReg->isAlwaysReady()) {
+
+                RegVal predictedValue;
+                Addr loadPC = inst->pcState().instAddr();
+
+                if (lvp->predict(loadPC, tid, predictedValue)) {
+                    // Write predicted value to the destination register.
+                    cpu->setReg(destReg, predictedValue, tid);
+
+                    // Mark the instruction as having a value prediction.
+                    inst->setValuePredicted();
+                    inst->lvpPredictedValue = predictedValue;
+                    inst->lvpPredictionMade = true;
+
+                    // Wake dependents in the IQ (sets internal scoreboard).
+                    // The isValuePredicted && !isExecuted guard in
+                    // wakeDependents skips the memDepUnit completion.
+                    instQueue.wakeDependents(inst);
+
+                    // Set the external scoreboard as ready.
+                    scoreboard->setReg(destReg);
+
+                    // Record prediction history.
+                    LVPHistory entry;
+                    entry.seqNum = inst->seqNum;
+                    entry.pc = loadPC;
+                    entry.tid = tid;
+                    entry.predictedValue = predictedValue;
+                    entry.predicted = true;
+                    lvp->addHistory(entry);
+
+                    DPRINTF(IEW, "[tid:%i] [sn:%llu] LVP: Predicted load "
+                            "PC %s -> %#x\n",
+                            tid, inst->seqNum, inst->pcState(),
+                            predictedValue);
+                }
+            }
+        }
+
         insts_to_dispatch.pop();
 
         toRename->iewInfo[tid].dispatched++;
@@ -1404,6 +1487,33 @@ IEW::writebackInsts()
         // when it's ready to execute the strictly ordered load.
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
+
+            // Load Value Prediction: validate at writeback.
+            // completeAcc() has already written the actual value to the
+            // physical register (see LSQUnit::writeback).
+            if (lvp && inst->isLoad() && inst->lvpPredictionMade) {
+                PhysRegIdPtr destReg = inst->renamedDestIdx(0);
+                RegVal actualValue = cpu->getReg(destReg, tid);
+
+                if (actualValue != inst->lvpPredictedValue) {
+                    DPRINTF(IEW, "[tid:%i] [sn:%llu] LVP misprediction "
+                            "PC %s predicted=%#x actual=%#x\n",
+                            tid, inst->seqNum, inst->pcState(),
+                            inst->lvpPredictedValue, actualValue);
+
+                    lvp->validate(inst->seqNum, actualValue);
+                    squashDueToValueMispredict(inst, tid);
+                    ++iewStats.valueMispredicts;
+                } else {
+                    DPRINTF(IEW, "[tid:%i] [sn:%llu] LVP correct "
+                            "PC %s value=%#x\n",
+                            tid, inst->seqNum, inst->pcState(),
+                            actualValue);
+
+                    lvp->validate(inst->seqNum, actualValue);
+                }
+            }
+
             int dependents = instQueue.wakeDependents(inst);
 
             for (int i = 0; i < inst->numDestRegs(); i++) {

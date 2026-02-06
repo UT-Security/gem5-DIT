@@ -346,6 +346,9 @@ class Commit
     /** Pointer to O3CPU. */
     CPU *cpu;
 
+    /** Load value predictor (nullptr if disabled). */
+    LoadValuePredictor *lvp;
+
     /** Vector of all of the threads. */
     std::vector<ThreadState *> thread;
 

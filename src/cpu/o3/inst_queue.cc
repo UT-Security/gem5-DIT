@@ -316,7 +316,10 @@ InstructionQueue::IQStats::IQStats(CPU *cpu, const unsigned &total_width)
       ADD_STAT(fuBusyRate,
                statistics::units::Rate<statistics::units::Count,
                                        statistics::units::Count>::get(),
-               "FU busy rate (busy events/executed inst)")
+               "FU busy rate (busy events/executed inst)"),
+      ADD_STAT(loadDepWaitCycles, statistics::units::Cycle::get(),
+               "Distribution of cycles a dependent instruction waits "
+               "in the IQ for a load value to resolve")
 {
     instsAdded
         .prereq(instsAdded);
@@ -420,6 +423,11 @@ InstructionQueue::IQStats::IQStats(CPU *cpu, const unsigned &total_width)
         .flags(statistics::total)
         ;
     fuBusyRate = fuBusy / instsIssued;
+
+    loadDepWaitCycles
+        .init(0, 299, 10)
+        .flags(statistics::nozero)
+        ;
 }
 
 InstructionQueue::IQIOStats::IQIOStats(statistics::Group *parent)
@@ -683,6 +691,8 @@ InstructionQueue::insert(const DynInstPtr &new_inst)
 
     instList[new_inst->threadNumber].push_back(new_inst);
 
+    new_inst->iqInsertTick = curTick();
+
     auto iq = findIQ(new_inst);
     assert(iq);
     iq->insert(new_inst);
@@ -726,6 +736,8 @@ InstructionQueue::insertNonSpec(const DynInstPtr &new_inst)
             new_inst->seqNum, new_inst->pcState());
 
     instList[new_inst->threadNumber].push_back(new_inst);
+
+    new_inst->iqInsertTick = curTick();
 
     auto iq = findIQ(new_inst);
     assert(iq);
@@ -1093,19 +1105,26 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
     // Tell the memory dependence unit to wake any dependents on this
     // instruction if it is a memory instruction.  Also complete the memory
     // instruction at this point since we know it executed without issues.
+    // Skip for value-predicted loads that have not yet executed — at
+    // dispatch time the load has not actually completed, so we must not
+    // mark it complete in the memory dependence unit.  Once the load
+    // truly executes (isExecuted), this block runs normally.
     ThreadID tid = completed_inst->threadNumber;
-    if (completed_inst->isMemRef()) {
-        memDepUnit[tid].completeInst(completed_inst);
+    if (!(completed_inst->isValuePredicted() &&
+          !completed_inst->isExecuted())) {
+        if (completed_inst->isMemRef()) {
+            memDepUnit[tid].completeInst(completed_inst);
 
-        DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%llu]\n",
-            completed_inst->pcState(), completed_inst->seqNum);
+            DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%llu]\n",
+                completed_inst->pcState(), completed_inst->seqNum);
 
-        completed_inst->clearInIQ();
-        completed_inst->memOpDone(true);
-    } else if (completed_inst->isReadBarrier() ||
-               completed_inst->isWriteBarrier()) {
-        // Completes a non mem ref barrier
-        memDepUnit[tid].completeInst(completed_inst);
+            completed_inst->clearInIQ();
+            completed_inst->memOpDone(true);
+        } else if (completed_inst->isReadBarrier() ||
+                   completed_inst->isWriteBarrier()) {
+            // Completes a non mem ref barrier
+            memDepUnit[tid].completeInst(completed_inst);
+        }
     }
 
     for (int dest_reg_idx = 0;
@@ -1151,6 +1170,14 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
             // ready.  However that would mean that the dependency
             // graph entries would need to hold the src_reg_idx.
             dep_inst->markSrcRegReady();
+
+            // Sample how long this dependent waited for a load value.
+            if (completed_inst->isLoad() &&
+                dep_inst->iqInsertTick != (Tick)-1) {
+                Tick wait = curTick() - dep_inst->iqInsertTick;
+                iqStats.loadDepWaitCycles.sample(
+                    cpu->ticksToCycles(wait));
+            }
 
             addIfReady(dep_inst);
 
