@@ -27,3 +27,9 @@ Modify arguments as needed
 ### Example on how to run any binary
 
 `./build/ARM/gem5.opt ./configs/example/arm/fdp_neoverse_v2_binary.py --binary 'any_binary' --arguments 'arg0 arg1 arg2'`
+
+### Development
+
+1. Operate on seperate branch that stable (this is master)
+2. make sure you add --no-verify at end of commit (Ex. `git commit -m "example" --no-verify`)
+3. git push branch_name
