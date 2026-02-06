@@ -30,6 +30,6 @@ Modify arguments as needed
 
 ### Development
 
-1. Operate on seperate branch that stable (this is master)
+1. Operate on seperate branch other than stable (this is master)
 2. make sure you add --no-verify at end of commit (Ex. `git commit -m "example" --no-verify`)
 3. git push branch_name
