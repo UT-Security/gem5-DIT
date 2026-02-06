@@ -1881,6 +1881,7 @@ std::unordered_map<MiscRegNum64, MiscRegIndex> miscRegNumToIdx{
     { MiscRegNum64(3, 0, 4, 2, 2), MISCREG_CURRENTEL },
     { MiscRegNum64(3, 0, 4, 2, 3), MISCREG_PAN },
     { MiscRegNum64(3, 0, 4, 2, 4), MISCREG_UAO },
+    { MiscRegNum64(3, 3, 4, 2, 5), MISCREG_DIT },
     { MiscRegNum64(3, 0, 4, 6, 0), MISCREG_ICC_PMR_EL1 },
     { MiscRegNum64(3, 0, 5, 1, 0), MISCREG_AFSR0_EL1 },
     { MiscRegNum64(3, 0, 5, 1, 1), MISCREG_AFSR1_EL1 },
@@ -5694,6 +5695,7 @@ ISA::initializeMiscRegMetadata()
           // MPAMv0p1
           pfr0_el1.mpam = 0x0;
           pfr0_el1.gic = FullSystem && getGICv3CPUInterface(tc) ? 0x1 : 0;
+          pfr0_el1.dit = release->has(ArmExtension::FEAT_DIT) ? 0x1 : 0x0;
           return pfr0_el1;
       }())
       .unserialize(0)
@@ -6131,6 +6133,8 @@ ISA::initializeMiscRegMetadata()
       .exceptUserMode();
     InitReg(MISCREG_UAO)
       .allPrivileges().exceptUserMode();
+    InitReg(MISCREG_DIT)
+      .allPrivileges(release->has(ArmExtension::FEAT_DIT));
     InitReg(MISCREG_NZCV)
       .allPrivileges();
     InitReg(MISCREG_DAIF)

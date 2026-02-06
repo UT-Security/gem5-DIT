@@ -105,6 +105,7 @@ class ArmExtension(ScopedEnum):
         "FEAT_TTST",
         "FEAT_FRINTTS",  # Optional in Armv8.4
         "FEAT_LRCPC2",
+        "FEAT_DIT",  # Optional in Armv8.2, mandatory from Armv8.4
         # Armv8.5
         "FEAT_FLAGM2",
         "FEAT_RNG",
@@ -227,6 +228,7 @@ class ArmDefaultRelease(Armv8):
         "FEAT_FLAGM",
         "FEAT_IDST",
         "FEAT_TTST",
+        "FEAT_DIT",
         # Armv8.5
         "FEAT_FLAGM2",
         "FEAT_EVT",
@@ -286,6 +288,7 @@ class Armv84(Armv83):
         "FEAT_IDST",
         "FEAT_TTST",
         "FEAT_FRINTTS",
+        "FEAT_DIT",
     ]
 
 
