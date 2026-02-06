@@ -77,6 +77,7 @@ class ArmDefaultSERelease(ArmRelease):
         "FEAT_FLAGM",
         "FEAT_FRINTTS",
         "FEAT_LRCPC2",
+        "FEAT_DIT",
         # Armv8.5
         "FEAT_FLAGM2",
         # Armv9.2
