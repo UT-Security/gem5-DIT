@@ -50,6 +50,7 @@
 #include "cpu/o3/inst_queue.hh"
 #include "cpu/o3/limits.hh"
 #include "cpu/o3/lsq.hh"
+#include "cpu/o3/lvp.hh"
 #include "cpu/o3/scoreboard.hh"
 #include "cpu/timebuf.hh"
 #include "debug/IEW.hh"
@@ -251,6 +252,11 @@ class IEW
      */
     void squashDueToMemOrder(const DynInstPtr &inst, ThreadID tid);
 
+    /** Sends commit proper information for a squash due to a load value
+     * misprediction.
+     */
+    void squashDueToValueMispredict(const DynInstPtr &inst, ThreadID tid);
+
     /** Sets Dispatch to blocked, and signals back to other stages to block. */
     void block(ThreadID tid);
 
@@ -361,6 +367,9 @@ class IEW
     /** Load / store queue. */
     LSQ ldstQueue;
 
+    /** Load value predictor (nullptr if disabled). */
+    LoadValuePredictor *lvp;
+
     /** Vector of pointers to the functional unit pools. */
     std::vector<FUPool *> fuPools;
     /** Records if the LSQ needs to be updated on the next cycle, so that
@@ -444,6 +453,8 @@ class IEW
         statistics::Scalar lsqFullEvents;
         /** Stat for total number of memory ordering violation events. */
         statistics::Scalar memOrderViolationEvents;
+        /** Stat for total number of load value misprediction events. */
+        statistics::Scalar valueMispredicts;
         /** Stat for total number of incorrect predicted taken branches. */
         statistics::Scalar predictedTakenIncorrect;
         /** Stat for total number of incorrect predicted not taken branches. */

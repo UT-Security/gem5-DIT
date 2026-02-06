@@ -613,6 +613,10 @@ class InstructionQueue
         statistics::Vector fuBusy;
         /** Number of times the FU was busy per instruction issued. */
         statistics::Formula fuBusyRate;
+
+        /** Distribution of cycles a dependent instruction waits in the
+         *  IQ for a load value to resolve. */
+        statistics::Distribution loadDepWaitCycles;
     } iqStats;
 
    public:

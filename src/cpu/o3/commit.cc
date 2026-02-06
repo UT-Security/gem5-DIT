@@ -126,6 +126,8 @@ Commit::Commit(CPU *_cpu, const BaseO3CPUParams &params)
     _status = Active;
     _nextStatus = Inactive;
 
+    lvp = params.loadValuePredictor;
+
     if (commitPolicy == CommitPolicy::RoundRobin) {
         //Set-Up Priority List
         for (ThreadID tid = 0; tid < numThreads; tid++) {
@@ -989,6 +991,21 @@ Commit::commitInsts()
                     ->committedInstType[head_inst->opClass()]++;
                 stats.committedInstType[tid][head_inst->opClass()]++;
                 ppCommit->notify(head_inst);
+
+                // Load Value Prediction: train the predictor with the
+                // actual committed value and clean up history.
+                if (head_inst->isLoad() && lvp &&
+                    lvp->isEnabled() &&
+                    head_inst->numDestRegs() > 0) {
+                    PhysRegIdPtr destReg = head_inst->renamedDestIdx(0);
+                    if (destReg->classValue() == IntRegClass &&
+                        !destReg->isAlwaysReady()) {
+                        Addr pc = head_inst->pcState().instAddr();
+                        RegVal actualValue = cpu->getReg(destReg, tid);
+                        lvp->update(pc, actualValue);
+                        lvp->commitEntry(head_inst->seqNum, tid);
+                    }
+                }
 
                 // hardware transactional memory
 

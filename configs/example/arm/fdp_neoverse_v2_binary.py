@@ -137,6 +137,12 @@ parser.add_argument(
     help='Arguments to pass to the binary (e.g., --arguments "-I./lib input.txt 100").',
 )
 
+parser.add_argument(
+    "--enable-lvp",
+    action="store_true",
+    help="Enable Load Value Prediction.",
+)
+
 args = parser.parse_args()
 
 
@@ -256,11 +262,16 @@ for core in processor.cores:
     else:
         cpu.decoupledFrontEnd = True
 
+    # Enable Load Value Prediction if requested.
+    if args.enable_lvp:
+        cpu.loadValuePredictor.enabled = True
+
 
 workload_name = args.binary if args.binary else args.workload
 print(
     f"Running {workload_name} on NeoverseV2 "
     f"FDP {'disabled' if args.disable_fdp else 'enabled'}"
+    f" LVP {'enabled' if args.enable_lvp else 'disabled'}"
 )
 
 
