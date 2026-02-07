@@ -996,7 +996,7 @@ Commit::commitInsts()
                 // actual committed value and clean up history.
                 if (head_inst->isLoad() && lvp &&
                     lvp->isEnabled() &&
-                    head_inst->numDestRegs() > 0) {
+                    head_inst->numDestRegs() == 1) {
                     PhysRegIdPtr destReg = head_inst->renamedDestIdx(0);
                     if (destReg->classValue() == IntRegClass &&
                         !destReg->isAlwaysReady()) {
