@@ -1124,7 +1124,7 @@ IEW::dispatchInsts(ThreadID tid)
         // speculatively wake dependent instructions.
         if (lvp && lvp->isEnabled() && inst->isLoad() &&
             !inst->isSquashed() && !inst->strictlyOrdered() &&
-            inst->numDestRegs() > 0) {
+            inst->numDestRegs() == 1) {
 
             PhysRegIdPtr destReg = inst->renamedDestIdx(0);
 
