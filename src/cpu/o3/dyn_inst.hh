@@ -190,6 +190,7 @@ class DynInst : public ExecContext, public RefCounted
         NoCapableFU,           /// Processor does not have capability to
                                /// execute the instruction
         ValuePredicted,        /// Load has a value prediction
+        CompSimplified,        /// Instruction was trivially simplified
         MaxFlags
     };
 
@@ -364,6 +365,11 @@ class DynInst : public ExecContext, public RefCounted
 
     /** Whether a value prediction was made for this load. */
     bool lvpPredictionMade = false;
+
+    /////////////////// Computation Simplification /////////////////////
+    /** Was this instruction trivially simplified (FU bypassed)? */
+    bool isCompSimplified() const { return instFlags[CompSimplified]; }
+    void setCompSimplified() { instFlags[CompSimplified] = true; }
 
     /////////////////////// TLB Miss //////////////////////
     /**

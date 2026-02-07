@@ -143,6 +143,12 @@ parser.add_argument(
     help="Enable Load Value Prediction.",
 )
 
+parser.add_argument(
+    "--enable-comp-simp",
+    action="store_true",
+    help="Enable Computation Simplification for trivial IntMult/IntDiv.",
+)
+
 args = parser.parse_args()
 
 
@@ -266,12 +272,17 @@ for core in processor.cores:
     if args.enable_lvp:
         cpu.loadValuePredictor.enabled = True
 
+    # Enable Computation Simplification if requested.
+    if args.enable_comp_simp:
+        cpu.compSimplifier.enabled = True
+
 
 workload_name = args.binary if args.binary else args.workload
 print(
     f"Running {workload_name} on NeoverseV2 "
     f"FDP {'disabled' if args.disable_fdp else 'enabled'}"
     f" LVP {'enabled' if args.enable_lvp else 'disabled'}"
+    f" CompSimp {'enabled' if args.enable_comp_simp else 'disabled'}"
 )
 
 

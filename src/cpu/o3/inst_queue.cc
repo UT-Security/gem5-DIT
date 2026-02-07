@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "base/logging.hh"
+#include "cpu/o3/comp_simplifier.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/fu_pool.hh"
 #include "cpu/o3/limits.hh"
@@ -231,6 +232,8 @@ InstructionQueue::InstructionQueue(CPU *cpu_ptr, IEW *iew_ptr,
       iqStats(cpu, totalWidth),
       iqIOStats(cpu)
 {
+    compSimplifier = params.compSimplifier;
+
     const auto &reg_classes = params.isa[0]->regClasses();
     // Set the number of total physical registers
     // As the vector registers have two addressing modes, they are added twice
@@ -921,9 +924,49 @@ InstructionQueue::scheduleReadyInsts()
             continue;
         }
 
+        ThreadID tid = issuing_inst->threadNumber;
+
+        // Check for trivial computation simplification before FU allocation.
+        // This bypasses the multi-cycle FU entirely for trivial IntMult/IntDiv.
+        // The actual result is computed normally by inst->execute() in
+        // executeInsts() — we just skip the multi-cycle FU scheduling.
+        RegVal compSimpResult;
+        if (compSimplifier &&
+            compSimplifier->trySimplify(issuing_inst, cpu, compSimpResult)) {
+            issuing_inst->setCompSimplified();
+
+            // Treat as 1-cycle, no FU needed
+            i2e_info->size++;
+            instsToExecute.push_back(issuing_inst);
+
+            readyInsts[op_class].pop();
+
+            if (!readyInsts[op_class].empty()) {
+                moveToYoungerInst(order_it);
+            } else {
+                readyIt[op_class] = listOrder.end();
+                queueOnList[op_class] = false;
+            }
+
+            issuing_inst->setIssued();
+            ++total_issued;
+
+#if TRACING_ON
+            issuing_inst->issueTick = curTick() - issuing_inst->fetchTick;
+#endif
+            if (issuing_inst->firstIssue == -1)
+                issuing_inst->firstIssue = curTick();
+
+            issuing_inst->clearInIQ();
+
+            listOrder.erase(order_it++);
+            iqStats.issuedInstType[tid][op_class]++;
+
+            continue;
+        }
+
         int idx = FUPool::NoNeedFU;
         Cycles op_latency = Cycles(1);
-        ThreadID tid = issuing_inst->threadNumber;
 
         IQUnit *iq = issuing_inst->iq;
         assert(iq);
