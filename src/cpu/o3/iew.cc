@@ -542,6 +542,7 @@ IEW::squashDueToValueMispredict(const DynInstPtr& inst, ThreadID tid)
 
         toCommit->squashedSeqNum[tid] = inst->seqNum;
         set(toCommit->pc[tid], inst->pcState());
+        inst->staticInst->advancePC(*toCommit->pc[tid]);
         toCommit->mispredictInst[tid] = NULL;
 
         // The load itself already has the correct value from completeAcc,
