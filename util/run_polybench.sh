@@ -16,8 +16,10 @@ BINARY_DIR=$ROOT_DIR/polybench_binaries
 MAX_JOBS=$(nproc)
 
 BENCHMARKS=($(ls "$BINARY_DIR"))
+TOTAL_RUNS=$(( ${#BENCHMARKS[@]} * 2 ))
 
-echo "Found ${#BENCHMARKS[@]} benchmarks, scheduling across $MAX_JOBS cores"
+echo "Found ${#BENCHMARKS[@]} benchmarks, $TOTAL_RUNS total runs (base + lvp)"
+echo "Scheduling across $MAX_JOBS cores"
 echo "============================================"
 
 run_bench() {
@@ -36,59 +38,33 @@ run_bench() {
 export -f run_bench
 export GEM5 CONFIG BINARY_DIR
 
-# Phase 1: baseline (no LVP)
-echo ""
-echo "=== Phase 1: Baseline (no LVP) ==="
-echo ""
 parallel_pids=()
 
 for bench in "${BENCHMARKS[@]}"; do
-    run_bench "$bench" "base" "" &
-    parallel_pids+=($!)
+    for suffix_args in "base:" "lvp:--enable-lvp"; do
+        suffix="${suffix_args%%:*}"
+        extra_args="${suffix_args#*:}"
 
-    # If we've hit the max, wait for one to finish
-    while (( ${#parallel_pids[@]} >= MAX_JOBS )); do
-        new_pids=()
-        for pid in "${parallel_pids[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                new_pids+=("$pid")
+        run_bench "$bench" "$suffix" "$extra_args" &
+        parallel_pids+=($!)
+
+        # If we've hit the max, wait for one to finish
+        while (( ${#parallel_pids[@]} >= MAX_JOBS )); do
+            new_pids=()
+            for pid in "${parallel_pids[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    new_pids+=("$pid")
+                fi
+            done
+            parallel_pids=("${new_pids[@]}")
+            if (( ${#parallel_pids[@]} >= MAX_JOBS )); then
+                sleep 1
             fi
         done
-        parallel_pids=("${new_pids[@]}")
-        if (( ${#parallel_pids[@]} >= MAX_JOBS )); then
-            sleep 1
-        fi
     done
 done
 
-# Wait for all baseline runs to finish
-for pid in "${parallel_pids[@]}"; do
-    wait "$pid"
-done
-
-echo ""
-echo "=== Phase 2: LVP Enabled ==="
-echo ""
-parallel_pids=()
-
-for bench in "${BENCHMARKS[@]}"; do
-    run_bench "$bench" "lvp" "--enable-lvp" &
-    parallel_pids+=($!)
-
-    while (( ${#parallel_pids[@]} >= MAX_JOBS )); do
-        new_pids=()
-        for pid in "${parallel_pids[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                new_pids+=("$pid")
-            fi
-        done
-        parallel_pids=("${new_pids[@]}")
-        if (( ${#parallel_pids[@]} >= MAX_JOBS )); then
-            sleep 1
-        fi
-    done
-done
-
+# Wait for all remaining runs
 for pid in "${parallel_pids[@]}"; do
     wait "$pid"
 done

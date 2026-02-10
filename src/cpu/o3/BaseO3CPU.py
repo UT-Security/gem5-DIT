@@ -46,6 +46,10 @@ from m5.objects.BranchPredictor import *
 from m5.objects.FUPool import *
 from m5.objects.IndexingPolicies import *
 from m5.objects.IQUnit import *
+<<<<<<< HEAD
+from m5.objects.CompSimplifier import *
+=======
+>>>>>>> stable
 from m5.objects.LoadValuePredictor import *
 from m5.objects.ReplacementPolicies import *
 from m5.objects.SMT import *
@@ -209,6 +213,10 @@ class BaseO3CPU(BaseCPU):
     loadValuePredictor = Param.LoadValuePredictor(
         LoadValuePredictor(enabled=False),
         "Load Value Predictor",
+    )
+    compSimplifier = Param.CompSimplifier(
+        CompSimplifier(enabled=False),
+        "Computation Simplifier",
     )
     needsTSO = Param.Bool(False, "Enable TSO Memory model")
 

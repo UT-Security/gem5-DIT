@@ -50,6 +50,7 @@ if env['CONF']['BUILD_ISA']:
     SimObject('SMT.py',
         enums=['SMTFetchPolicy', 'SMTQueuePolicy', 'CommitPolicy'])
     SimObject('LoadValuePredictor.py', sim_objects=['LoadValuePredictor'])
+    SimObject('CompSimplifier.py', sim_objects=['CompSimplifier'])
 
     Source('bac.cc')
     Source('commit.cc')
@@ -64,6 +65,7 @@ if env['CONF']['BUILD_ISA']:
     Source('inst_queue.cc')
     Source('lsq.cc')
     Source('lvp.cc')
+    Source('comp_simplifier.cc')
     Source('lsq_unit.cc')
     Source('mem_dep_unit.cc')
     Source('regfile.cc')
@@ -82,6 +84,7 @@ if env['CONF']['BUILD_ISA']:
     DebugFlag('IQ')
     DebugFlag('LSQ')
     DebugFlag('LVP')
+    DebugFlag('CompSimp')
     DebugFlag('LSQUnit')
     DebugFlag('MemDepUnit')
     DebugFlag('O3CPU')
@@ -94,7 +97,8 @@ if env['CONF']['BUILD_ISA']:
     CompoundFlag('O3CPUAll', [ 'BAC', 'FTQ', 'Fetch', 'Decode', 'Rename',
         'IEW', 'Commit',
         'IQ', 'ROB', 'FreeList', 'LSQ', 'LSQUnit', 'StoreSet', 'MemDepUnit',
-        'DynInst', 'O3CPU', 'Activity', 'Scoreboard', 'Writeback', 'LVP' ])
+        'DynInst', 'O3CPU', 'Activity', 'Scoreboard', 'Writeback', 'LVP',
+        'CompSimp' ])
 
     SimObject('BaseO3Checker.py', sim_objects=['BaseO3Checker'])
     Source('checker.cc')

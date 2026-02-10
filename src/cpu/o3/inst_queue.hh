@@ -75,6 +75,7 @@ class MemInterface;
 namespace o3
 {
 
+class CompSimplifier;
 class FUPool;
 class CPU;
 class IEW;
@@ -389,6 +390,9 @@ class InstructionQueue
 
     /** Pointer to IEW stage. */
     IEW *iewStage;
+
+    /** Computation simplifier (nullptr if disabled). */
+    CompSimplifier *compSimplifier;
 
     /** List of Instruction Queues */
     std::vector<IQUnit *> iqs;
