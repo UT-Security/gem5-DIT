@@ -90,6 +90,7 @@ class NeoverseV2_FP(FUDesc):
         OpDesc(opClass="FloatDiv", opLat=12, pipelined=False),
         OpDesc(opClass="FloatSqrt", opLat=33, pipelined=False),
         OpDesc(opClass="FloatMult", opLat=3),
+        OpDesc(opClass="FloatMultAcc", opLat=4),
         OpDesc(opClass="FloatMisc", opLat=4),
     ]
 
@@ -100,11 +101,17 @@ class Neoverse_V2_FP_FUP(FUPool):
 
 # Load/Store Unit
 class NeoverseV2_Load(FUDesc):
-    opList = [OpDesc(opClass="MemRead", opLat=2)]
+    opList = [
+        OpDesc(opClass="MemRead", opLat=2),
+        OpDesc(opClass="FloatMemRead", opLat=2),
+    ]
 
 
 class NeoverseV2_Store(FUDesc):
-    opList = [OpDesc(opClass="MemWrite", opLat=2)]
+    opList = [
+        OpDesc(opClass="MemWrite", opLat=2),
+        OpDesc(opClass="FloatMemWrite", opLat=2),
+    ]
 
 
 # Load only pool

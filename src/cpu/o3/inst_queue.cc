@@ -1232,6 +1232,9 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
         // Reset the head node now that all of its dependents have
         // been woken up.
         assert(dependGraph.empty(dest_reg->flatIndex()));
+        while (!dependGraph.empty(dest_reg->flatIndex())) {
+            dependGraph.pop(dest_reg->flatIndex());
+        }
         dependGraph.clearInst(dest_reg->flatIndex());
 
         // Mark the scoreboard as having that register ready.

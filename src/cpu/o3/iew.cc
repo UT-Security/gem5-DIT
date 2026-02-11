@@ -974,6 +974,27 @@ IEW::dispatchInsts(ThreadID tid)
 
         // Check for full conditions.
         if (instQueue.isFull(inst)) {
+            // Check if no FU pool in the system can handle this
+            // instruction's OpClass. If so, the instruction can never
+            // be dispatched or executed, causing a permanent deadlock.
+            if (inst->opClass() != No_OpClass) {
+                bool anyCapable = false;
+                for (auto *pool : instQueue.allFUPools()) {
+                    if (pool->isCapable(inst->opClass())) {
+                        anyCapable = true;
+                        break;
+                    }
+                }
+                if (!anyCapable) {
+                    panic("No functional unit capable of executing "
+                          "instruction [sn:%llu] PC %s with OpClass "
+                          "%s. Add this OpClass to a functional unit "
+                          "in your CPU configuration.",
+                          inst->seqNum, inst->pcState(),
+                          enums::OpClassStrings[inst->opClass()]);
+                }
+            }
+
             DPRINTF(IEW, "[tid:%i] Issue: IQ has become full.\n", tid);
 
             // Call function to start blocking.
