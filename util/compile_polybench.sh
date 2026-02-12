@@ -8,11 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-POLYBENCH_DIR="$HOME/Documents/PolyBenchC"
+POLYBENCH_DIR="$ROOT_DIR/PolyBenchC"
 OUT_DIR="$ROOT_DIR/polybench_binaries"
 CC=aarch64-linux-gnu-gcc
 DATASET="${1:-MINI_DATASET}"
-CFLAGS="-static -O2 -march=armv8.4-a -D$DATASET -DPOLYBENCH_DUMP_ARRAYS"
+CFLAGS="-static -O2 -march=armv8.4-a -D$DATASET"
+#-DPOLYBENCH_DUMP_ARRAYS
 M5_INCLUDE="$ROOT_DIR/include"
 M5_LIBDIR="$ROOT_DIR/util/m5/build/arm64/out"
 LIBS="-lm"
