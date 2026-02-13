@@ -92,6 +92,7 @@ class NeoverseV2_FP(FUDesc):
         OpDesc(opClass="FloatMult", opLat=3),
         OpDesc(opClass="FloatMultAcc", opLat=4),
         OpDesc(opClass="FloatMisc", opLat=4),
+        OpDesc(opClass="SimdPredAlu", opLat=8), # this is just so psel works
     ]
 
 
