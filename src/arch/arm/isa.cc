@@ -618,7 +618,11 @@ ISA::readMiscReg(RegIndex idx)
         }
       case MISCREG_DIT:
         {
-            return miscRegs[MISCREG_CPSR] & 0x1000000;
+            CPSR cpsr = 0;
+            cpsr.dit = tc->getReg(cc_reg::Dit);
+            DPRINTF(MiscRegs, "Reading DIT from CC reg: %d\n",
+                    (uint64_t)cpsr.dit);
+            return cpsr;
         }
       case MISCREG_L2CTLR:
         {
@@ -1344,11 +1348,13 @@ ISA::setMiscReg(RegIndex idx, RegVal val)
             break;
           case MISCREG_DIT:
             {
-                // DIT does NOT affect memory accesses - no MMU invalidation
                 CPSR cpsr = miscRegs[MISCREG_CPSR];
                 cpsr.dit = (uint8_t) ((CPSR) newVal).dit;
                 newVal = cpsr;
                 idx = MISCREG_CPSR;
+                tc->setReg(cc_reg::Dit, (RegVal) cpsr.dit);
+                DPRINTF(MiscRegs, "Writing DIT CC reg: %d\n",
+                        (uint64_t)cpsr.dit);
             }
             break;
           case MISCREG_L2CTLR:

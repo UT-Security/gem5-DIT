@@ -502,6 +502,7 @@ ArmFault::invoke32(ThreadContext *tc, const StaticInstPtr &inst)
     saved_cpsr.c = tc->getReg(cc_reg::C);
     saved_cpsr.v = tc->getReg(cc_reg::V);
     saved_cpsr.ge = tc->getReg(cc_reg::Ge);
+    saved_cpsr.dit = tc->getReg(cc_reg::Dit);
 
     [[maybe_unused]] Addr cur_pc = tc->pcState().as<PCState>().pc();
     ITSTATE it = tc->pcState().as<PCState>().itstate();

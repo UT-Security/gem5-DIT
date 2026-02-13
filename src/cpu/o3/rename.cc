@@ -43,6 +43,7 @@
 
 #include <list>
 
+#include "arch/arm/regs/cc.hh"
 #include "cpu/o3/cpu.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/limits.hh"
@@ -1095,6 +1096,18 @@ Rename::renameSrcRegs(const DynInstPtr &inst, ThreadID tid)
 
         inst->renameSrcReg(src_idx, renamed_reg);
 
+        // DIT debug: check DitCC readiness at rename
+        if (flat_reg == ArmISA::cc_reg::Dit) {
+            DPRINTF(Rename, "[tid:%i] DIT CC src for [sn:%llu] PC %s: "
+                    "arch idx %d, phys reg %d (flat %d), "
+                    "scoreboard ready=%d, isAlwaysReady=%d\n",
+                    tid, inst->seqNum, inst->pcState(),
+                    flat_reg.index(), renamed_reg->index(),
+                    renamed_reg->flatIndex(),
+                    (int)scoreboard->getReg(renamed_reg),
+                    (int)renamed_reg->isAlwaysReady());
+        }
+
         // See if the register is ready or not.
         if (scoreboard->getReg(renamed_reg)) {
             DPRINTF(Rename,
@@ -1137,6 +1150,10 @@ Rename::renameDestRegs(const DynInstPtr &inst, ThreadID tid)
         inst->flattenedDestIdx(dest_idx, flat_dest_regid);
 
         scoreboard->unsetReg(rename_result.first);
+
+        // panic_if(flat_dest_regid == ArmISA::cc_reg::Dit,
+        //          "DitCC written as dest by [sn:%llu] PC %s",
+        //          inst->seqNum, inst->pcState());
 
         DPRINTF(Rename,
                 "[tid:%i] "
