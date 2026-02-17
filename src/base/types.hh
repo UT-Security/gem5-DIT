@@ -46,6 +46,11 @@
 namespace gem5
 {
 
+/** Used to indicate the type of prediction that the value predictor makes */
+#define VP_PREDICTABLE          1
+#define VP_UNPREDICTABLE        0
+typedef uint8_t VPType;
+
 /** Statistics counter type.  Not much excuse for not using a 64-bit
  * integer here, but if you're desperate and only run short
  * simulations you could make this 32 bits.

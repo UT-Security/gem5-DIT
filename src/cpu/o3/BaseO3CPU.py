@@ -47,6 +47,7 @@ from m5.objects.FUPool import *
 from m5.objects.IndexingPolicies import *
 from m5.objects.IQUnit import *
 from m5.objects.ReplacementPolicies import *
+from m5.objects.ValuePredictionUnit import *
 from m5.objects.SMT import *
 from m5.params import *
 from m5.proxy import *
@@ -206,6 +207,8 @@ class BaseO3CPU(BaseCPU):
         "Branch Predictor",
     )
     needsTSO = Param.Bool(False, "Enable TSO Memory model")
+
+    valPred = Param.ValuePredictionUnit(ValuePredictionUnit(), "Value Predictor")
 
     recvRespThrottling = Param.Bool(
         False, "Enable load receive response throttling in the LSQ"

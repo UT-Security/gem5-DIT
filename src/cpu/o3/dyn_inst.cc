@@ -455,5 +455,37 @@ DynInst::initiateMemAMO(Addr addr, unsigned size, Request::Flags flags,
             std::move(amo_op), std::vector<bool>(size, true));
 }
 
+std::pair<VPType, RegVal>
+DynInst::predictValue(ThreadID tid)
+{
+    assert(cpu->vp);
+    auto result = cpu->vp->predictLoad(tid, pcState().instAddr());
+    _classification = result.first;
+    _predictedVal = result.second;
+    _predictionCorrect = false;  // Will be verified later
+    return result;
+}
+
+bool
+DynInst::verifyValuePrediction(ThreadID tid, RegVal actual_val)
+{
+    assert(cpu->vp);
+    // Compare predicted vs actual value
+    _predictionCorrect = (_predictedVal == actual_val);
+
+    // Update LVP tables with verification result
+    // Correct parameter order: tid, pc, load_address, correct_val, predicted_val, classification
+    cpu->vp->verifyPrediction(tid, pcState().instAddr(), effAddr,
+                               actual_val, _predictedVal,
+                               _classification);
+    DPRINTF(DynInst, "[tid:%d] LVP: [sn:%lli] prediction %s (predicted: 0x%x, actual: 0x%x)\n",
+            tid, seqNum,
+            _predictionCorrect ? "correct" : "incorrect",
+            _predictedVal, actual_val);
+    // Return whether prediction was correct
+
+    return _predictionCorrect;
+}
+
 } // namespace o3
 } // namespace gem5

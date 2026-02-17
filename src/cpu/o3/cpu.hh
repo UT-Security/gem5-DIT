@@ -554,6 +554,9 @@ class CPU : public BaseCPU
      */
     gem5::Checker<DynInstPtr> *checker;
 
+    /** Pointer to the value prediction unit */
+    ValuePredictionUnit *vp;
+
     /** Pointer to the system. */
     System *system;
 

@@ -520,6 +520,27 @@ IEW::squashDueToMemOrder(const DynInstPtr& inst, ThreadID tid)
 }
 
 void
+IEW::squashDueToValueMispred(const DynInstPtr& inst, ThreadID tid)
+{
+    DPRINTF(IEW, "[tid:%i] Value misprediction, squashing younger "
+            "insts, PC: %s [sn:%llu].\n", tid, inst->pcState(), inst->seqNum);
+
+    if (!toCommit->squash[tid] ||
+            inst->seqNum < toCommit->squashedSeqNum[tid]) {
+        toCommit->squash[tid] = true;
+        toCommit->squashedSeqNum[tid] = inst->seqNum;
+        set(toCommit->pc[tid], inst->pcState());
+        inst->staticInst->advancePC(*toCommit->pc[tid]);
+
+        toCommit->mispredictInst[tid] = inst;
+        // Don't include the load itself in the squash - it has correct data
+        toCommit->includeSquashInst[tid] = false;
+
+        wroteToTimeBuffer = true;
+    }
+}
+
+void
 IEW::block(ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Blocking.\n", tid);
@@ -988,7 +1009,31 @@ IEW::dispatchInsts(ThreadID tid)
 
 
         // Otherwise issue the instruction just fine.
-        if (inst->isAtomic()) {
+
+        // Attempt to try value prediction
+        std::pair<VPType, RegVal> prediction;
+        if (inst->isValuePredictable()) {
+            prediction = inst->predictValue(tid);
+
+            if (prediction.first == VP_UNPREDICTABLE) {
+                DPRINTF(IEW, "[tid:%i] VP: Instruction does not have confident prediction.\n", tid);
+            }
+        }
+
+        if (inst->isValuePredictable() && prediction.first != VP_UNPREDICTABLE) {
+            auto [classification, predicted_value] = prediction
+
+            // Write predicted value to destination register (speculative)
+            inst->setRegOperand(inst->staticInst.get(), 0, predicted_value);
+            scoreboard->setReg(dest_reg);
+
+            // Mark this load as LVP-predicted for tracking
+            inst->setVpPredicted(true);
+            inst->setWasVpPredicted(true);  // Persistent flag for stats
+
+            DPRINTF(IEW, "[tid:%i] VP: Predicted value written, scoreboard marked ready, "
+                    "dependent instructions can now execute speculatively\n", tid);
+        } else if (inst->isAtomic()) {
             DPRINTF(IEW, "[tid:%i] Issue: Memory instruction "
                     "encountered, adding to LSQ.\n", tid);
 
@@ -1355,6 +1400,30 @@ IEW::executeInsts()
 
                 ++iewStats.memOrderViolationEvents;
             }
+        }
+    }
+
+    // Check for value mispredictions
+    if (inst->isVpPredicted()) {
+        PhysRegIdPtr dest_reg = inst->renamedDestIdx(0);
+        RegVal actual_value = cpu->getReg(dest_reg, inst->threadNumber);
+        bool correct = inst->verifyValuePrediction(inst->threadNumber, actual_value);
+
+        // Instruction's value is now no longer speculative
+        inst->setVpPredicted(false);
+
+        // Squash on misprediction for constant loads only
+        // This removes all younger instructions that executed with wrong value
+        if (!correct) {
+            DPRINTF(LSQUnit, "VP: Instruction [sn:%lli] value misprediction, "
+                    "squashing younger instructions that used wrong value\n",
+                    inst->seqNum);
+            iewStage->squashDueToValueMispred(inst, inst->threadNumber);
+            cpu->vp->recordSquash();
+        } else if (correct && inst->isConstantLoad()) {
+            DPRINTF(IEW, "VP: Load [sn:%lli] prediction CORRECT, "
+                    "dependent instructions already executed with correct value\n",
+                    inst->seqNum);
         }
     }
 

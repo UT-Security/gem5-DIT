@@ -189,6 +189,7 @@ class DynInst : public ExecContext, public RefCounted
         HtmFromTransaction,
         NoCapableFU,           /// Processor does not have capability to
                                /// execute the instruction
+        VpPredicted,           /// Value was predicted by LVP
         MaxFlags
     };
 
@@ -237,6 +238,14 @@ class DynInst : public ExecContext, public RefCounted
 
     // Whether or not the source register is ready, one bit per register.
     uint8_t *_readySrcIdx;
+
+    /* Fields for Value Prediction */
+    /** The Predicted Value for This Instruction */
+    RegVal _predictedVal;
+    /** Whether the prediction was correct */
+    bool _predictionCorrect;
+    /** Whether this instruction was ever VP-predicted (persistent, never cleared) */
+    bool _wasVpPredicted = false;
 
   public:
     size_t numSrcs() const { return _numSrcs; }
@@ -379,6 +388,20 @@ class DynInst : public ExecContext, public RefCounted
     /** Whether or not the memory operation is done. */
     bool memOpDone() const { return instFlags[MemOpDone]; }
     void memOpDone(bool f) { instFlags[MemOpDone] = f; }
+
+    /** Whether this instruction is ellgible for value prediction */
+    bool isValuePredictable() const { return false; } // TODO
+
+    /** Whether or not this instruction was predicted by VP. */
+    bool isVpPredicted() const { return instFlags[VpPredicted]; }
+    void setVpPredicted(bool f) { instFlags[VpPredicted] = f; }
+
+    /** Whether this load was ever LVP-predicted (persistent flag for stats). */
+    bool wasVpPredicted() const { return _wasVpPredicted; }
+    void setWasVpPredicted(bool f) { _wasVpPredicted = f; }
+
+    /** Whether the VP prediction was correct (set during verification). */
+    bool predictionWasCorrect() const { return _predictionCorrect; }
 
     bool notAnInst() const { return instFlags[NotAnInst]; }
     void setNotAnInst() { instFlags[NotAnInst] = true; }
@@ -641,6 +664,13 @@ class DynInst : public ExecContext, public RefCounted
             htmDepth = 0;
         }
     }
+
+    /* Value Predictor methods */
+    /** Predict load value using LVP */
+    std::pair<VPType, RegVal> predictValue(ThreadID tid);
+
+    /** Verify prediction and update LVP tables */
+    bool verifyValuePrediction(ThreadID tid, RegVal actual_val);
 
     /** Temporarily sets this instruction as a serialize before instruction. */
     void setSerializeBefore() { status.set(SerializeBefore); }
